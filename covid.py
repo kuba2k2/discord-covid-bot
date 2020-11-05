@@ -9,9 +9,36 @@ from settings import URL_DATASETS
 
 tz = datetime.now().astimezone().tzinfo
 
+BY_REGION = 0
+REGION = 1
+INFECTED = 2
+DEATHS = 3
+RECOVERED = 4
+TESTED = 5
+
 
 def _get_date(date: str) -> datetime:
     return datetime.fromisoformat(date.replace("Z", "+00:00")).astimezone(tz)
+
+
+def v(obj: dict, type: int):
+    keys = []
+    if type == BY_REGION:
+        keys = ["infectedByRegion", "casesByState"]
+    elif type == REGION:
+        keys = ["region", "name"]
+    elif type == INFECTED:
+        keys = ["infected", "infectedCount", "casesReported", "totalCases"]
+    elif type == DEATHS:
+        keys = ["deceased", "deceasedCount", "deaths", "deathCount", "totalDeaths"]
+    elif type == RECOVERED:
+        keys = ["recovered", "recoveredCount", "discharged"]
+    elif type == TESTED:
+        keys = ["tested", "testedCount", "testsPerformed"]
+    try:
+        return next(obj[key] for key in keys if key in obj)
+    except StopIteration:
+        return None
 
 
 class Covid:
@@ -64,30 +91,31 @@ class Covid:
             return await response.json()
 
     def get_counts(self, items: list) -> list:
-        items.sort(key=lambda x: x["infected"])
+        items.sort(key=lambda x: v(x, INFECTED))
         result = []
 
         for item in items:
             count = {
                 "date": _get_date(item["lastUpdatedAtApify"]),
-                "infected": item["infected"],
-                "deaths": item["deceased"],
+                "infected": v(item, INFECTED),
+                "deaths": v(item, DEATHS),
                 "byRegion": [],
             }
-            if "infectedByRegion" in item:
-                for region in item["infectedByRegion"]:
+            by_region = v(item, BY_REGION)
+            if by_region:
+                for region in by_region:
                     count["byRegion"].append(
                         {
-                            "region": region["region"],
-                            "infected": region["infectedCount"],
-                            "deaths": region["deceasedCount"],
+                            "region": v(region, REGION),
+                            "infected": v(region, INFECTED),
+                            "deaths": v(region, DEATHS),
                         }
                     )
             result.append(count)
         return result
 
     def get_diffs(self, items: list) -> list:
-        items.sort(key=lambda x: x["infected"])
+        items.sort(key=lambda x: v(x, INFECTED))
         result = []
         i = iter(items)
         prev_item = next(i)
@@ -95,20 +123,20 @@ class Covid:
         for item in i:
             diff = {
                 "date": _get_date(item["lastUpdatedAtApify"]),
-                "infected": item["infected"] - prev_item["infected"],
-                "deaths": item["deceased"] - prev_item["deceased"],
+                "infected": (v(item, INFECTED) or 0) - (v(prev_item, INFECTED) or 0),
+                "deaths": (v(item, DEATHS) or 0) - (v(prev_item, DEATHS) or 0),
                 "byRegion": [],
             }
-            if "infectedByRegion" in item:
-                for index, region in enumerate(item["infectedByRegion"]):
-                    prev_region = prev_item["infectedByRegion"][index]
+            by_region = v(item, BY_REGION)
+            prev_by_region = v(prev_item, BY_REGION)
+            if by_region:
+                for index, region in enumerate(by_region):
+                    prev_region = prev_by_region[index]
                     diff["byRegion"].append(
                         {
-                            "region": region["region"],
-                            "infected": region["infectedCount"]
-                            - prev_region["infectedCount"],
-                            "deaths": region["deceasedCount"]
-                            - prev_region["deceasedCount"],
+                            "region": v(region, REGION) or "",
+                            "infected": (v(region, INFECTED) or 0) - (v(prev_region, INFECTED) or 0),
+                            "deaths": (v(region, DEATHS) or 0) - (v(prev_region, DEATHS) or 0),
                         }
                     )
             result.append(diff)
