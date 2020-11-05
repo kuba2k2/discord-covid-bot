@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from time import time
 from typing import Union, Tuple
 
 import aiohttp
@@ -17,21 +18,27 @@ class Covid:
     def __init__(self, base_url) -> None:
         self._session = aiohttp.ClientSession()
         self._base_url = base_url
+        self._country_cache = None
+        self._country_cache_time = None
 
     async def get_dataset_id(self, country: str) -> Union[Tuple[str, str], None]:
         try:
-            async with self._session.get(URL_DATASETS) as response:
-                country = next(
-                    item
-                    for item in await response.json()
-                    if item["country"].lower() == country.lower()
-                )
-                return (
-                    country["country"],
-                    country["historyData"].split("/")[
-                        5
-                    ],  # just don't ask; a part of the URL
-                )
+            if not self._country_cache_time or time() - self._country_cache_time > 24*60*60:
+                async with self._session.get(URL_DATASETS) as response:
+                    self._country_cache = await response.json()
+                    self._country_cache_time = time()
+
+            country = next(
+                item
+                for item in self._country_cache
+                if item["country"].lower() == country.lower()
+            )
+            return (
+                country["country"],
+                country["historyData"].split("/")[
+                    5
+                ],  # just don't ask; a part of the URL
+            )
         except:
             pass
         return None
