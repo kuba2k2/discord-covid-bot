@@ -6,6 +6,9 @@ load_dotenv(encoding="utf-8")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
+URL_DATASETS = os.getenv("URL_DATASETS")
+URL_ITEMS = os.getenv("URL_ITEMS")
+
 TEXT_TITLE_TOP = os.getenv("TEXT_TITLE_TOP")
 
 TEXT_STATS_DESCRIPTION = os.getenv("TEXT_STATS_DESCRIPTION")

@@ -1,7 +1,10 @@
 import asyncio
 from datetime import datetime
+from typing import Union, Tuple
 
 import aiohttp
+
+from settings import URL_DATASETS
 
 tz = datetime.now().astimezone().tzinfo
 
@@ -15,7 +18,27 @@ class Covid:
         self._session = aiohttp.ClientSession()
         self._base_url = base_url
 
-    async def get_items(self, limit: int = None, descending: bool = True) -> list:
+    async def get_dataset_id(self, country: str) -> Union[Tuple[str, str], None]:
+        try:
+            async with self._session.get(URL_DATASETS) as response:
+                country = next(
+                    item
+                    for item in await response.json()
+                    if item["country"].lower() == country.lower()
+                )
+                return (
+                    country["country"],
+                    country["historyData"].split("/")[
+                        5
+                    ],  # just don't ask; a part of the URL
+                )
+        except:
+            pass
+        return None
+
+    async def get_items(
+        self, dataset_id: str, limit: int = None, descending: bool = True
+    ) -> list:
         params = {
             "limit": limit,
             "desc": 1 if descending else 0,
@@ -23,7 +46,7 @@ class Covid:
             "format": "json",
         }
         url = (
-            self._base_url
+            self._base_url.replace("$ID", dataset_id)
             + "?"
             + "&".join(
                 param[0] + "=" + str(param[1]) for param in params.items() if param[1]
@@ -44,14 +67,15 @@ class Covid:
                 "deaths": item["deceased"],
                 "byRegion": [],
             }
-            for region in item["infectedByRegion"]:
-                count["byRegion"].append(
-                    {
-                        "region": region["region"],
-                        "infected": region["infectedCount"],
-                        "deaths": region["deceasedCount"],
-                    }
-                )
+            if "infectedByRegion" in item:
+                for region in item["infectedByRegion"]:
+                    count["byRegion"].append(
+                        {
+                            "region": region["region"],
+                            "infected": region["infectedCount"],
+                            "deaths": region["deceasedCount"],
+                        }
+                    )
             result.append(count)
         return result
 
@@ -68,17 +92,18 @@ class Covid:
                 "deaths": item["deceased"] - prev_item["deceased"],
                 "byRegion": [],
             }
-            for index, region in enumerate(item["infectedByRegion"]):
-                prev_region = prev_item["infectedByRegion"][index]
-                diff["byRegion"].append(
-                    {
-                        "region": region["region"],
-                        "infected": region["infectedCount"]
-                        - prev_region["infectedCount"],
-                        "deaths": region["deceasedCount"]
-                        - prev_region["deceasedCount"],
-                    }
-                )
+            if "infectedByRegion" in item:
+                for index, region in enumerate(item["infectedByRegion"]):
+                    prev_region = prev_item["infectedByRegion"][index]
+                    diff["byRegion"].append(
+                        {
+                            "region": region["region"],
+                            "infected": region["infectedCount"]
+                            - prev_region["infectedCount"],
+                            "deaths": region["deceasedCount"]
+                            - prev_region["deceasedCount"],
+                        }
+                    )
             result.append(diff)
             prev_item = item
         return result

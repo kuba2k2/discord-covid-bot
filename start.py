@@ -1,12 +1,16 @@
-from discord import Embed
+import time
+
+from discord import Embed, Guild
 from discord.ext import commands
 from discord.ext.commands.context import Context
 
 from covid import Covid
+from database import Database
 from settings import *
 
+database = Database()
 bot = commands.Bot(command_prefix="!")
-covid = Covid("https://api.apify.com/v2/datasets/L3VCmhMeX0KUQeJto/items")
+covid = Covid(URL_ITEMS)
 
 
 def get_field_value(
@@ -41,6 +45,8 @@ def add_counts(embed: Embed, counts: list, show_diff: bool):
 def add_region_counts(embed: Embed, counts: list, show_diff: bool, limit: int = None):
     today = counts[0]["byRegion"]
     yesterday = counts[1]["byRegion"]
+    if not today or not yesterday:
+        return
     title = TEXT_BY_REGION_TITLE
 
     keys = ["infected"]
@@ -68,9 +74,33 @@ def add_region_counts(embed: Embed, counts: list, show_diff: bool, limit: int = 
 
 
 @bot.command(name="covid")
-async def main(ctx: Context):
+async def main(ctx: Context, *args):
+    time_start = time.time() * 1000
+    if args and args[0] == "setup":
+        if len(args) == 1:
+            await ctx.send("Usage: `!covid setup <country>`")
+            return
+
+        country = await covid.get_dataset_id(country=args[1])
+        if country is None:
+            await ctx.send(f"The country name `{args[1]}` is invalid.")
+            return
+        (country_name, dataset_id) = country
+
+        database.add_guild(ctx.guild, country_name, dataset_id)
+        await ctx.send(f"The guild is now set up for country `{country_name}`. "
+                       "Try it using `!covid`.\n"
+                       "Set up daily statistics for a channel using `!covid notify`.")
+        return
+
+    config = database.get_by_guild(ctx.guild)
+    if not config or not config[0]["datasetId"]:
+        await ctx.send("Configure the guild first using `!covid setup <country>`.")
+        return
+    config = config[0]
+
     async with ctx.channel.typing():
-        items = await covid.get_items(limit=3, descending=True)
+        items = await covid.get_items(dataset_id=config["datasetId"], limit=3, descending=True)
 
         counts = covid.get_counts(items)
         diffs = covid.get_diffs(items)
@@ -96,8 +126,20 @@ async def main(ctx: Context):
         add_counts(embed, counts, show_diff=False)
         # add_region_counts(embed, counts, show_diff=False, limit=5)
 
+        time_end = time.time() * 1000
+        embed.set_footer(text=f"{int(time_end - time_start)} ms")
+
         await ctx.send(embed=embed)
 
+
+@bot.event
+async def on_guild_join(guild: Guild):
+    database.add_guild(guild)
+
+
+@bot.event
+async def on_guild_remove(guild: Guild):
+    database.remove_guild(guild)
 
 if __name__ == "__main__":
     bot.run(BOT_TOKEN)
