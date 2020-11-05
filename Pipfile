@@ -7,7 +7,7 @@ verify_ssl = true
 black = "*"
 
 [packages]
-"discord.py" = "*"
+discord = "*"
 aiohttp = {extras = ["speedups"], version = "*"}
 python-dotenv = "*"
 
