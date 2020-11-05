@@ -1,6 +1,9 @@
-import time
+import asyncio
+from time import time as time_unix
+from datetime import datetime, time, timedelta
+from typing import Union
 
-from discord import Embed, Guild
+from discord import Embed, Guild, TextChannel
 from discord.ext import commands
 from discord.ext.commands.context import Context
 
@@ -85,12 +88,34 @@ async def covid_setup(ctx: Context, *args):
     (country_name, dataset_id) = country
 
     database.add_guild(ctx.guild, country_name, dataset_id)
-    await ctx.send(f"The guild is now set up for country `{country_name}`. "
-                   "Try it using `!covid`.\n"
-                   "Set up daily statistics for a channel using `!covid notify`.")
+    await ctx.send(
+        f"The guild is now set up for country `{country_name}`. "
+        "Try it using `!covid`.\n"
+        "Set up daily statistics for a channel using `!covid notify`."
+    )
 
 
-async def covid_get(ctx: Context, time_start: float, country_name: str, dataset_id: str):
+async def covid_notify(ctx: Context, *args):
+    if len(args) == 1:
+        await ctx.send("Usage: `!covid notify <hour>:<minute>`")
+        return
+    run_at = time.fromisoformat(args[1]).strftime("%H:%M")
+
+    database.add_channel(ctx.author, ctx.channel, run_at)
+    config = database.get_by_channel(ctx.channel)
+    schedule(config)
+    await ctx.send(
+        f"The channel is now set up to receive stats for "
+        f"country `{config['countryName']}` every day at {run_at}."
+    )
+
+
+async def covid_get(
+    target: Union[Context, TextChannel],
+    time_start: float,
+    country_name: str,
+    dataset_id: str,
+):
     items = await covid.get_items(dataset_id=dataset_id, limit=3, descending=True)
 
     counts = covid.get_counts(items)
@@ -117,22 +142,22 @@ async def covid_get(ctx: Context, time_start: float, country_name: str, dataset_
     add_counts(embed, counts, show_diff=False)
     # add_region_counts(embed, counts, show_diff=False, limit=5)
 
-    time_end = time.time() * 1000
+    time_end = time_unix() * 1000
     embed.set_footer(text=f"{int(time_end - time_start)} ms")
 
-    await ctx.send(embed=embed)
+    await target.send(embed=embed)
 
 
 @bot.command(name="covid")
 async def main(ctx: Context, *args):
-    time_start = time.time() * 1000
+    time_start = time_unix() * 1000
     try:
         if args:
             if args[0] == "setup":
-                await covid_setup(ctx, args)
+                await covid_setup(ctx, *args)
                 return
             elif args[0] == "notify":
-                await covid_setup(ctx, args)
+                await covid_notify(ctx, *args)
                 return
             else:
                 country = await covid.get_dataset_id(country=args[0])
@@ -143,7 +168,9 @@ async def main(ctx: Context, *args):
         else:
             config = database.get_by_guild(ctx.guild)
             if not config or not config[0]["datasetId"]:
-                await ctx.send("Configure the guild first using `!covid setup <country>`.")
+                await ctx.send(
+                    "Configure the guild first using `!covid setup <country>`."
+                )
                 return
             config = config[0]
             country_name = config["countryName"]
@@ -163,6 +190,41 @@ async def on_guild_join(guild: Guild):
 @bot.event
 async def on_guild_remove(guild: Guild):
     database.remove_guild(guild)
+
+
+async def publish_stats(config: dict):
+    time_start = time_unix() * 1000
+    channel: TextChannel = bot.get_channel(config["channelId"])
+    async with channel.typing():
+        await covid_get(channel, time_start, config["countryName"], config["datasetId"])
+    schedule(config)
+
+
+async def wait_until(dt: datetime):
+    now = datetime.now()
+    await asyncio.sleep((dt - now).total_seconds())
+
+
+async def run_at(dt: datetime, coroutine):
+    await wait_until(dt)
+    return await coroutine
+
+
+def schedule(config: dict):
+    now = datetime.now()
+    today = now.date()
+    hour = now.time()
+
+    next_at = time.fromisoformat(config["runAt"])
+    if next_at > hour:
+        next_at = datetime.combine(today, next_at)
+    else:
+        next_at = datetime.combine(today + timedelta(days=1), next_at)
+
+    asyncio.get_event_loop().create_task(
+        run_at(next_at, publish_stats(config))
+    )
+
 
 if __name__ == "__main__":
     bot.run(BOT_TOKEN)

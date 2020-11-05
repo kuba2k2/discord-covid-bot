@@ -25,7 +25,7 @@ class Database:
         if dataset_id:
             c.execute(
                 "UPDATE guild SET countryName = ?, datasetId = ? WHERE guildId = ?;",
-                (country_name, dataset_id, guild.id)
+                (country_name, dataset_id, guild.id),
             )
         self._conn.commit()
 
@@ -37,10 +37,26 @@ class Database:
         )
         self._conn.commit()
 
+    def add_channel(self, user: User, channel: TextChannel, run_at: str):
+        c = self._conn.cursor()
+        c.execute(
+            "REPLACE INTO channel "
+            "(guildId, channelId, addedById, addedByName, runAt) "
+            "VALUES (?, ?, ?, ?, ?);",
+            (
+                channel.guild.id,
+                channel.id,
+                user.id,
+                f"{user.name}#{user.discriminator}",
+                run_at,
+            ),
+        )
+        self._conn.commit()
+
     def get_by_guild(self, guild: Guild) -> List[dict]:
         c = self._conn.cursor()
         c.execute(
-            "SELECT countryName, datasetId, mentionEveryone, runAt "
+            "SELECT channel.guildId, channelId, countryName, datasetId, mentionEveryone, runAt "
             "FROM guild LEFT JOIN channel "
             "WHERE guild.guildId = ?;",
             (guild.id,),
@@ -51,9 +67,18 @@ class Database:
         c = self._conn.cursor()
         c.execute(
             "SELECT "
-            "countryName, datasetId, mentionEveryone, runAt "
+            "channel.guildId, channelId, countryName, datasetId, mentionEveryone, runAt "
             "FROM channel JOIN guild "
             "WHERE channel.guildId = ? AND channel.channelId = ?;",
             (channel.guild.id, channel.id),
         )
         return c.fetchone()
+
+    def get_all(self) -> List[dict]:
+        c = self._conn.cursor()
+        c.execute(
+            "SELECT channel.guildId, channelId, countryName, datasetId, mentionEveryone, runAt "
+            "FROM guild LEFT JOIN channel "
+            "WHERE runAt IS NOT NULL;"
+        )
+        return c.fetchall()
